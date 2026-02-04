@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "AI Job Application Assistant",
+    "version": "1.0.0",
+    "description": "Auto-fill job applications with AI.",
+    "permissions": [
+        "activeTab",
+        "scripting",
+        "storage",
+        "sidePanel"
+    ],
+    "host_permissions": [
+        "https://*/*"
+    ],
+    "background": {
+        "service_worker": "src/background/index.js",
+        "type": "module"
+    },
+    "action": {
+        "default_title": "Open AI Assistant"
+    },
+    "side_panel": {
+        "default_path": "index.html"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "src/content/index.js"
+            ]
+        }
+    ]
+}
