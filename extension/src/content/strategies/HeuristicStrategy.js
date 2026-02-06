@@ -122,7 +122,11 @@ export class HeuristicStrategy extends BaseStrategy {
 
     fillStandardInput(element, value) {
         element.focus();
-        element.value = value;
+
+        // React Hack: Call native value setter to trigger internal state update
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(element, value);
+
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -132,8 +136,9 @@ export class HeuristicStrategy extends BaseStrategy {
         element.focus();
         element.click();
 
-        // Try setting value + input event first (fastest)
-        element.value = value;
+        // 1. Try setting value + input event (fastest) via React Hack
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(element, value);
         element.dispatchEvent(new Event('input', { bubbles: true }));
 
         // Wait for dropdown
