@@ -124,7 +124,11 @@ export class HeuristicStrategy extends BaseStrategy {
         element.focus();
 
         // React Hack: Call native value setter to trigger internal state update
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        const proto = element.tagName.toLowerCase() === 'textarea'
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype;
+
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, "value").set;
         nativeInputValueSetter.call(element, value);
 
         element.dispatchEvent(new Event('input', { bubbles: true }));
