@@ -23,6 +23,12 @@ export class GreenhouseStrategy extends HeuristicStrategy {
 
         try {
             count += await super.autofill(profile);
+
+            // CRITICAL: Resume upload often triggers a partial page reload/parsing overlay.
+            // We MUST wait for this to settle before trying to find the next fields.
+            console.log('Post-Resume Wait (2s) for DOM stability...');
+            await new Promise(r => setTimeout(r, 2000));
+
         } catch (e) {
             console.error('Standard autofill failed (non-fatal):', e);
         }
