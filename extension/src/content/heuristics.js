@@ -6,35 +6,59 @@ export const FIELD_MAPPINGS = {
     linkedin: ['linkedin', 'linked in'],
     portfolio: ['portfolio', 'website', 'personal site'],
     resume: ['resume', 'cv', 'curriculum vitae'],
-    coverLetter: ['cover letter', 'coverletter']
+    coverLetter: ['cover letter', 'coverletter'],
+    school: ['school', 'university', 'college', 'institution', 'alma mater'],
+    degree: ['degree', 'qualification', 'major'],
+    company: ['company', 'organization', 'employer', 'work experience'],
+    title: ['job title', 'role', 'position'],
+    startDate: ['start date', 'from', 'start'],
+    endDate: ['end date', 'to', 'end'],
+    location: ['location', 'city', 'address'],
+    currentRole: ['current role', 'current position']
 };
 
 export const getFieldType = (element) => {
+    // 1. Collect potential label sources
     const attributes = [
         element.id,
         element.name,
         element.getAttribute('aria-label'),
         element.placeholder,
-        // Label text needs to be found from a corresponding label tag
     ].filter(Boolean).map(s => s.toLowerCase());
 
-    // Also check associated label
+    // 2. Find label text (the most reliable source for display)
     let labelText = '';
+
+    // Check explicit label for
     if (element.id) {
         const label = document.querySelector(`label[for="${element.id}"]`);
-        if (label) labelText = label.innerText.toLowerCase();
+        if (label) labelText = label.innerText;
     }
-    // Or parent label
-    const parentLabel = element.closest('label');
-    if (parentLabel) labelText += ' ' + parentLabel.innerText.toLowerCase();
 
-    if (labelText) attributes.push(labelText);
+    // Check aria-labelledby
+    if (!labelText && element.getAttribute('aria-labelledby')) {
+        const labelId = element.getAttribute('aria-labelledby');
+        const label = document.getElementById(labelId);
+        if (label) labelText = label.innerText;
+    }
 
+    // Check parent label (implicit)
+    if (!labelText) {
+        const parentLabel = element.closest('label');
+        if (parentLabel) labelText = parentLabel.innerText;
+    }
+
+    // Clean up label text
+    const cleanLabel = labelText ? labelText.toLowerCase().trim() : '';
+
+    if (cleanLabel) attributes.push(cleanLabel);
+
+    // 3. Match against mappings
     for (const [key, keywords] of Object.entries(FIELD_MAPPINGS)) {
         if (keywords.some(k => attributes.some(attr => attr.includes(k)))) {
-            return key;
+            return { type: key, label: labelText || key };
         }
     }
 
-    return 'unknown';
+    return { type: 'unknown', label: labelText };
 };

@@ -88,7 +88,7 @@ function App() {
     <div className="container" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       <header className="flex items-center justify-between mb-2">
         <h2>Job Flow AI</h2>
-        <div className="badge">v1.0</div>
+        <div className="badge">v1.1.2</div>
       </header>
 
       <div className="tabs">
