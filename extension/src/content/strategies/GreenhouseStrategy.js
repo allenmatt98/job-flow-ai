@@ -1,5 +1,10 @@
 import { HeuristicStrategy } from './HeuristicStrategy';
 import { getFieldType } from '../heuristics';
+import { SmartMatcher } from '../../utils/SmartMatcher';
+import { waitForNewElements } from '../utils/DomWaiter';
+import { markField, FillConfidence } from '../utils/FillFeedback';
+
+const smartMatcher = new SmartMatcher();
 
 export class GreenhouseStrategy extends HeuristicStrategy {
     constructor() {
@@ -11,204 +16,324 @@ export class GreenhouseStrategy extends HeuristicStrategy {
     }
 
     async autofill(profile) {
-        // 1. Run standard fill (Name, Email, Phone, Resume)
-        // Heuristic strategy handles the basic #first_name, #last_name etc. quite well.
-        console.log('Starting Greenhouse Autofill...');
-        console.log('Profile Data received:', JSON.stringify({
-            educationCount: profile.education ? profile.education.length : 0,
-            experienceCount: profile.experience ? profile.experience.length : 0,
-            hasResume: !!profile.resume
-        }, null, 2));
+        console.log('Starting Greenhouse Autofill (SmartMatcher Enabled)...');
         let count = 0;
 
         try {
+            // 1. Standard Fill
             count += await super.autofill(profile);
 
-            // CRITICAL: Resume upload often triggers a partial page reload/parsing overlay.
-            // We MUST wait for this to settle before trying to find the next fields.
-            console.log('Post-Resume Wait (2s) for DOM stability...');
-            await new Promise(r => setTimeout(r, 2000));
+            console.log('Post-Resume Wait (5s) for parsing...');
+            await new Promise(r => setTimeout(r, 5000));
 
         } catch (e) {
             console.error('Standard autofill failed (non-fatal):', e);
         }
 
-        // 2. Handle Education
+        // 2. Education
         if (profile.education && profile.education.length > 0) {
             try {
                 console.log('Starting Education Section...');
+                await this.scrollToSection('education');
                 count += await this.fillComplexSection(
                     profile.education,
                     'education',
-                    'school_name' // Field signature to check if "Add" worked
+                    'school'
                 );
-            } catch (e) {
-                console.error('Education section failed:', e);
-            }
+            } catch (e) { console.error('Education failed:', e); }
         }
 
-        // 3. Handle Employment
+        // 3. Employment
         if (profile.experience && profile.experience.length > 0) {
             try {
                 console.log('Starting Employment Section...');
+                await this.scrollToSection('employment');
                 count += await this.fillComplexSection(
                     profile.experience,
                     'employment',
-                    'company_name'
+                    'company'
                 );
-            } catch (e) {
-                console.error('Employment section failed:', e);
-            }
+            } catch (e) { console.error('Employment failed:', e); }
         }
+
+        // 4. Demographics
+        try {
+            console.log('Starting Demographics...');
+            await this.scrollToSection('demographic');
+            count += await this.fillDemographics(profile.userProfile);
+        } catch (e) { console.error('Demographics failed:', e); }
 
         return count;
     }
 
-    async fillComplexSection(dataArray, sectionName, signatureField) {
-        let count = 0;
+    async scrollToSection(keyword) {
+        const headers = Array.from(document.querySelectorAll('h1, h2, h3, h4, div.heading, .section-header'));
+        const target = headers.find(h => h.innerText.toLowerCase().includes(keyword));
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await new Promise(r => setTimeout(r, 500));
+        }
+    }
 
-        // Find the main container for this section
-        // Greenhouse usually separates sections, but let's try to find potential containers
-        // OR, rely on finding specific "Add Another" buttons to anchor ourselves.
+    async fillComplexSection(dataArray, sectionName, signatureType) {
+        let count = 0;
 
         for (let i = 0; i < dataArray.length; i++) {
             const item = dataArray[i];
 
-            // 1. Identify context for this item (the i-th set of fields)
-            // Greenhouse often appends new sets of fields with specific classes or ID patterns.
-            // But now we want to search via Label.
-            // Problem: Multiple "School" fields exist.
-            // Solution: Find ALL "School" fields, pick the i-th one.
+            // 1. ADD ANOTHER LOGIC
+            let signatureFields = this.findFieldsByType(signatureType);
 
-            // Wait a bit if we just added a row
-            if (i > 0) {
-                await new Promise(r => setTimeout(r, 600));
-            }
+            if (i >= signatureFields.length) {
+                console.log(`[Greenhouse] Adding row for ${sectionName} (index ${i})`);
 
-            // Check if we need to add a row
-            // Strategy: Count how many "School" (or signature) fields exist.
-            const signatureLabel = signatureField.replace(/_/g, ' '); // school_name -> school name
-            const currentFields = this.findFieldsByLabelPattern(signatureLabel);
+                // Find the "Add another" button — try specific text first, then
+                // fall back to generic "add another" within the section's fieldset/container
+                const sectionHeader = Array.from(document.querySelectorAll('h1, h2, h3, h4, legend, .section-header'))
+                    .find(h => h.innerText.toLowerCase().includes(sectionName));
+                const sectionContainer = sectionHeader
+                    ? (sectionHeader.closest('fieldset') || sectionHeader.parentElement)
+                    : document;
 
-            if (currentFields.length <= i) {
-                const addLink = Array.from(document.querySelectorAll('a, button')).find(el =>
-                    el.innerText.toLowerCase().includes(`add another ${sectionName}`) ||
-                    el.innerText.toLowerCase().includes(`add ${sectionName}`)
-                );
+                const buttons = Array.from(sectionContainer.querySelectorAll('a, button'));
+                const addBtn = buttons.find(el => {
+                    const t = el.innerText.toLowerCase().trim();
+                    return (
+                        t.includes(`add another ${sectionName}`) ||
+                        t.includes(`add ${sectionName}`) ||
+                        t === 'add another' ||
+                        t.includes('add another')
+                    ) && el.offsetParent !== null;
+                });
 
-                if (addLink) {
-                    addLink.click();
-                    await new Promise(r => setTimeout(r, 600)); // Wait for DOM
+                if (addBtn) {
+                    // Find the container to observe for new elements
+                    const container = addBtn.closest('fieldset')
+                        || addBtn.closest('[id*="' + sectionName + '"]')
+                        || sectionContainer;
+
+                    // Determine selector for signature fields within this container
+                    const selector = 'input, select, textarea';
+                    const baselineCount = signatureFields.length;
+
+                    addBtn.click();
+
+                    // Wait for DOM mutation instead of fixed timeout
+                    await waitForNewElements(container, selector, baselineCount);
+
+                    // Small stabilization delay for React batched renders
+                    await new Promise(r => setTimeout(r, 200));
+
+                    signatureFields = this.findFieldsByType(signatureType);
                 }
             }
 
-            // 2. Fill fields for index 'i'
-            // We find ALL matching fields for a type, and take the i-th one.
-            // This assumes the order of fields in DOM matches the logical order.
-
+            // 2. FILL FIELDS
             if (sectionName === 'education') {
-                count += this.fillAtIndex(i, 'school', item.school);
-                count += this.fillAtIndex(i, 'degree', item.degree);
-                count += this.fillAtIndex(i, 'start_date_year', item.start);
-                count += this.fillAtIndex(i, 'end_date_year', item.end);
+                count += await this.fillSmartInput(i, 'school', item.school);
+                count += await this.fillSmartDropdown(i, 'degree', item.degree);
+                count += await this.fillAtIndex(i, 'startDate', { month: '', year: item.start });
+                count += await this.fillAtIndex(i, 'endDate', { month: '', year: item.end });
             }
             else if (sectionName === 'employment') {
-                count += this.fillAtIndex(i, 'company_name', item.company); // map to company
-                count += this.fillAtIndex(i, 'title', item.title);
+                count += await this.fillSmartInput(i, 'company', item.company);
+                count += await this.fillSmartInput(i, 'title', item.title);
+                count += await this.fillAtIndex(i, 'description', item.description);
 
-                // Dates logic handling
                 const startParams = this.parseDate(item.start);
                 const endParams = this.parseDate(item.end);
-
-                count += this.fillAtIndex(i, 'start_date_month', startParams.month);
-                count += this.fillAtIndex(i, 'start_date_year', startParams.year);
-                count += this.fillAtIndex(i, 'end_date_month', endParams.month);
-                count += this.fillAtIndex(i, 'end_date_year', endParams.year);
+                count += await this.fillAtIndex(i, 'startDate', startParams);
+                count += await this.fillAtIndex(i, 'endDate', endParams);
             }
         }
         return count;
     }
 
-    async fillAtIndex(index, fieldType, value) {
+    async fillSmartInput(index, fieldType, value) {
+        if (!value) return 0;
+        const matches = this.findFieldsByType(fieldType).filter(el => el.type !== 'hidden');
+        const element = matches[index];
+
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            const isCombobox = element.getAttribute('role') === 'combobox' ||
+                element.className.includes('select') ||
+                element.className.includes('chosen');
+
+            if (isCombobox) {
+                return await this.fillComboboxLikeWithFeedback(element, value);
+            } else {
+                await this.fillFieldWithTimeout(element, value);
+                markField(element, FillConfidence.HIGH);
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    async fillSmartDropdown(index, fieldType, value) {
         if (!value) return 0;
 
-        // Use heuristics to find all fields of this type
-        // This relies on getFieldType from heuristics.js returning the TYPE
-        // But getFieldType uses FIELD_MAPPINGS.
-        // We need to temporarily force a search for this specific type label.
+        const matches = this.findFieldsByType(fieldType).filter(el => el.type !== 'hidden');
+        const element = matches[index];
 
-        const allInputs = Array.from(document.querySelectorAll('input, select, textarea'));
-        const matches = allInputs.filter(input => {
-            // We can use the text mapping from heuristics, or just search loosely
-            // Let's reuse getFieldType logic but specifically for this target type?
-            // Or simpler: filter by label text inclusion.
-            const typeInfo = this.getFieldTypeWithLabel(input, fieldType);
-            return typeInfo.type === fieldType || (fieldType === 'company_name' && typeInfo.type === 'company');
-        });
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        console.log(`[Greenhouse] fillAtIndex: Searched for '${fieldType}' (index ${index}), found ${matches.length} matches.`);
-        if (matches.length <= index) {
-            console.warn(`[Greenhouse] Warning: Could not find field '${fieldType}' at index ${index}. Matches: ${matches.length}`);
+            // Gather options if it's a native select
+            let options = [];
+            if (element.tagName.toLowerCase() === 'select') {
+                options = Array.from(element.options).map(o => o.text);
+            }
+
+            if (options.length > 0) {
+                const result = smartMatcher.findBestMatchTiered(value, options);
+                console.log(`[SmartDropdown] '${value}' -> Tiered result:`, result);
+
+                if (result) {
+                    await this.fillFieldWithTimeout(element, result.match);
+                    const confidence = result.confidence === 'high'
+                        ? FillConfidence.HIGH
+                        : FillConfidence.MEDIUM;
+                    markField(element, confidence, `Matched "${value}" → "${result.match}" (${result.confidence}, ${result.score.toFixed(2)})`);
+                    return 1;
+                } else {
+                    // No match — do NOT force fill
+                    markField(element, FillConfidence.FAILED, `No match found for "${value}"`);
+                    return 0;
+                }
+            }
+
+            // Not a native select — try combobox-style fill
+            return await this.fillComboboxLikeWithFeedback(element, value);
+        }
+        return 0;
+    }
+
+    async fillComboboxLikeWithFeedback(element, value) {
+        try {
+            element.focus();
+            element.click();
+
+            const proto = window.HTMLInputElement.prototype;
+            const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value").set;
+            nativeSetter.call(element, value);
+
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+
+            await new Promise(r => setTimeout(r, 800)); // Wait for dropdown results
+
+            // Try to find the BEST option in the visible dropdown
+            const visibleOptions = Array.from(document.querySelectorAll(
+                '.select2-results__option, .select__option, [role="option"]'
+            ));
+            const optionTexts = visibleOptions.map(o => o.innerText);
+
+            if (optionTexts.length > 0) {
+                const result = smartMatcher.findBestMatchTiered(value, optionTexts);
+
+                if (result) {
+                    const bestOptionEl = visibleOptions.find(o => o.innerText === result.match);
+                    if (bestOptionEl) {
+                        bestOptionEl.click();
+                        const confidence = result.confidence === 'high'
+                            ? FillConfidence.HIGH
+                            : FillConfidence.MEDIUM;
+                        markField(element, confidence, `Matched "${value}" → "${result.match}" (${result.confidence})`);
+                        return 1;
+                    }
+                }
+            }
+
+            // No match — clear the input and mark as failed (do NOT force Enter)
+            nativeSetter.call(element, '');
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.blur();
+            markField(element, FillConfidence.FAILED, `No dropdown match for "${value}"`);
+            return 0;
+        } catch (e) {
+            console.warn('Combobox fill failed', e);
+            markField(element, FillConfidence.FAILED, `Combobox error: ${e.message}`);
+            return 0;
+        }
+    }
+
+    async fillAtIndex(index, fieldType, value) {
+        if (!value) return 0;
+        const matches = this.findFieldsByType(fieldType).filter(el => el.type !== 'hidden');
+
+        if (fieldType === 'startDate' || fieldType === 'endDate') {
+            const monthMatches = matches.filter(el => this.getLabelText(el).includes('month'));
+            const yearMatches = matches.filter(el => this.getLabelText(el).includes('year'));
+
+            let c = 0;
+            if (monthMatches[index] && value.month) {
+                await this.fillFieldWithTimeout(monthMatches[index], value.month);
+                markField(monthMatches[index], FillConfidence.HIGH);
+                c++;
+            }
+            if (yearMatches[index] && value.year) {
+                await this.fillFieldWithTimeout(yearMatches[index], value.year);
+                markField(yearMatches[index], FillConfidence.HIGH);
+                c++;
+            }
+            return c;
         }
 
         if (matches[index]) {
-            // Use safe timeout wrapper
-            await this.fillFieldWithTimeout(matches[index].element, value);
+            await this.fillFieldWithTimeout(matches[index], value);
+            markField(matches[index], FillConfidence.HIGH);
             return 1;
         }
         return 0;
     }
 
-    // Helper to reuse the enhanced heuristics detection
-    getFieldTypeWithLabel(element, targetType) {
-        // Broaden the search to include ID and Name checks, which are very reliable on Greenhouse
-        const labelText = this.getLabelText(element);
-        const attributes = [
-            labelText,
-            element.id,
-            element.name,
-            element.getAttribute('aria-label')
-        ].filter(Boolean).map(s => s.toLowerCase());
+    async fillDemographics(userProfile) {
+        let count = 0;
+        const demoFields = ['gender', 'race', 'veteran', 'disability'];
+        for (const type of demoFields) {
+            if (userProfile[type]) {
+                const matches = this.findFieldsByType(type);
+                if (matches[0]) {
+                    const element = matches[0];
 
-        // EXCLUSION: If we are looking for a 'year' but the field is about 'experience', skip it.
-        // Handles "Years of Experience" (and typos like "Expereince")
-        if (targetType.includes('year') && attributes.some(attr => attr.includes('exper'))) {
-            return { type: 'unknown', element };
+                    // Use tiered matching for demographic selects
+                    if (element.tagName.toLowerCase() === 'select') {
+                        const options = Array.from(element.options).map(o => o.text);
+                        const result = smartMatcher.findBestMatchTiered(userProfile[type], options);
+
+                        if (result) {
+                            await this.fillFieldWithTimeout(element, result.match);
+                            const confidence = result.confidence === 'high'
+                                ? FillConfidence.HIGH
+                                : FillConfidence.MEDIUM;
+                            markField(element, confidence, `Matched "${userProfile[type]}" → "${result.match}"`);
+                            count++;
+                        } else {
+                            markField(element, FillConfidence.FAILED, `No match for "${userProfile[type]}"`);
+                        }
+                    } else {
+                        await this.fillFieldWithTimeout(element, userProfile[type]);
+                        markField(element, FillConfidence.HIGH);
+                        count++;
+                    }
+                }
+            }
         }
+        return count;
+    }
 
-        const strictMappings = {
-            'start_date_year': ['start', 'year'],
-            'end_date_year': ['end', 'year'],
-            'start_date_month': ['start', 'month'],
-            'end_date_month': ['end', 'month']
-        };
-
-        if (strictMappings[targetType]) {
-            const requiredTokens = strictMappings[targetType];
-            // Check if ANY attribute contains ALL required tokens
-            // e.g. id="education_start_date_year" contains 'start' and 'year'
-            const match = attributes.some(attr => requiredTokens.every(token => attr.includes(token)));
-            if (match) return { type: targetType, element };
-        }
-
-        // Fallback or Standard Mappings
-        const labels = {
-            'school': ['school', 'university', 'institution'],
-            'degree': ['degree', 'qualification'],
-            'company_name': ['company', 'organization'],
-            'title': ['title', 'role', 'position']
-        }[targetType] || [targetType.replace(/_/g, ' ')];
-
-        // For standard fields, just check if any attribute contains the keyword
-        if (labels.some(l => attributes.some(attr => attr.includes(l)))) {
-            return { type: targetType, element };
-        }
-
-        return { type: 'unknown', element };
+    findFieldsByType(type) {
+        return Array.from(document.querySelectorAll('input, select, textarea')).filter(el => {
+            if (el.type === 'hidden' || el.style.display === 'none') return false;
+            return getFieldType(el).type === type;
+        });
     }
 
     getLabelText(element) {
-        // Re-implement basic label finding
         let text = '';
         if (element.id) {
             const label = document.querySelector(`label[for="${element.id}"]`);
@@ -219,28 +344,11 @@ export class GreenhouseStrategy extends HeuristicStrategy {
             const parentLabel = element.closest('label');
             if (parentLabel) text = parentLabel.innerText;
         }
-        // Common Greenhouse pattern: Label is a sibling or in the same container div
-        if (!text) {
-            const container = element.closest('div');
-            if (container) {
-                const siblingLabel = container.querySelector('label');
-                if (siblingLabel) text = siblingLabel.innerText;
-            }
-        }
-
-        return text ? text.toLowerCase().trim() : '';
-    }
-
-    findFieldsByLabelPattern(pattern) {
-        return Array.from(document.querySelectorAll('input, select, textarea')).filter(el => {
-            const label = this.getLabelText(el);
-            return label.includes(pattern);
-        });
+        return text ? text.toLowerCase() : '';
     }
 
     parseDate(dateStr) {
         if (!dateStr) return { month: '', year: '' };
-        // YYYY-MM
         const parts = dateStr.split('-');
         return { year: parts[0], month: parts[1] };
     }

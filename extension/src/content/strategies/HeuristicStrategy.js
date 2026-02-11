@@ -1,6 +1,7 @@
 import { BaseStrategy } from './BaseStrategy';
 import { FIELD_MAPPINGS, getFieldType } from '../heuristics';
 import { uploadResume } from '../utils/FileUploader';
+import { markField, FillConfidence } from '../utils/FillFeedback';
 
 export class HeuristicStrategy extends BaseStrategy {
     constructor(name = 'Heuristic') {
@@ -36,7 +37,7 @@ export class HeuristicStrategy extends BaseStrategy {
 
                 // Visual highlight
                 try {
-                    if (!isHidden) input.style.border = '2px solid #3b82f6';
+                    if (!isHidden) markField(input, FillConfidence.SCANNED);
                 } catch (e) { }
             }
         });
@@ -54,6 +55,7 @@ export class HeuristicStrategy extends BaseStrategy {
         let filledCount = 0;
         console.log('Starting Heuristic Autofill...');
 
+        // Pass 1: Profile data fill
         for (const field of this.pageFields) {
             try {
                 // Safety Bubble: Each field runs independently
@@ -61,11 +63,10 @@ export class HeuristicStrategy extends BaseStrategy {
                     const val = profile.userProfile[field.type];
                     // Sequential Execution: Wait for this field to finish
                     await this.fillFieldWithTimeout(field.element, val);
+                    markField(field.element, FillConfidence.HIGH);
                     filledCount++;
                 }
                 else if (field.type === 'resume' && profile.resume) {
-                    // Resume upload can take time, definitely await it or at least wrap in try-catch
-                    // uploadResume is synchronous currently but might trigger events
                     console.log('Uploading resume...');
                     const success = uploadResume(field.element, profile.resume);
                     if (success) filledCount++;
@@ -73,8 +74,36 @@ export class HeuristicStrategy extends BaseStrategy {
             } catch (err) {
                 // Never stop the flow
                 console.error(`Failed to fill field ${field.label || field.type}:`, err);
+                markField(field.element, FillConfidence.FAILED, `Fill failed: ${err.message}`);
             }
         }
+
+        // Pass 2: Memory recall for unknown fields
+        try {
+            const { recallAnswer } = await import('../../utils/AnswerMemory.js');
+            const unknownFields = this.pageFields.filter(f =>
+                f.type === 'unknown' && f.label && !f.element.value
+            );
+
+            for (const field of unknownFields) {
+                try {
+                    const recalled = await recallAnswer(field.label);
+                    if (recalled) {
+                        await this.fillFieldWithTimeout(field.element, recalled.answer);
+                        const confidence = recalled.confidence === 'high'
+                            ? FillConfidence.HIGH
+                            : FillConfidence.MEDIUM;
+                        markField(field.element, confidence, `Memory: "${recalled.answer}"`);
+                        filledCount++;
+                    }
+                } catch (err) {
+                    console.error(`Memory fill failed for "${field.label}":`, err);
+                }
+            }
+        } catch (err) {
+            console.error('Memory recall module load failed:', err);
+        }
+
         return filledCount;
     }
 
@@ -195,13 +224,63 @@ export class HeuristicStrategy extends BaseStrategy {
     }
 
     fillRadio(element, value) {
-        // Radio is usually part of a group. 
-        // We probably passed the specific radio button here? 
+        // Radio is usually part of a group.
+        // We probably passed the specific radio button here?
         // If we passed one radio button, we might need to find its group if the value doesn't match THIS button.
         // But simplified: if the value matches this button's value/label, click it.
         const valStr = String(value).toLowerCase();
         if (element.value.toLowerCase() === valStr || (element.nextSibling && element.nextSibling.textContent && element.nextSibling.textContent.toLowerCase() === valStr)) {
             element.click();
         }
+    }
+
+    /**
+     * Capture current values of unknown fields for saving to memory.
+     * @returns {Array<{question: string, answer: string, fieldTag: string}>}
+     */
+    captureUnknownAnswers() {
+        const entries = [];
+
+        for (const field of this.pageFields) {
+            if (field.type !== 'unknown' || !field.label) continue;
+
+            const el = field.element;
+            const tag = el.tagName.toLowerCase();
+            let answer = '';
+
+            if (tag === 'select') {
+                const selected = el.options[el.selectedIndex];
+                // Skip if default/placeholder option (index 0 with empty value)
+                if (selected && el.selectedIndex > 0) {
+                    answer = selected.text.trim();
+                }
+            } else if (el.type === 'radio') {
+                // Find the checked radio in the same group
+                if (el.name) {
+                    const checked = document.querySelector(`input[name="${el.name}"]:checked`);
+                    if (checked) {
+                        // Get label for the checked radio
+                        const radioLabel = checked.nextSibling?.textContent?.trim()
+                            || checked.closest('label')?.textContent?.trim()
+                            || checked.value;
+                        answer = radioLabel;
+                    }
+                }
+            } else if (el.type === 'checkbox') {
+                answer = el.checked ? 'Yes' : '';
+            } else {
+                answer = el.value.trim();
+            }
+
+            if (answer) {
+                entries.push({
+                    question: field.label,
+                    answer,
+                    fieldTag: tag
+                });
+            }
+        }
+
+        return entries;
     }
 }

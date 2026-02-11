@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getProfile, saveProfile } from '../utils/storage';
+import { getProfile, saveProfile, getAnswerMemory, saveAnswerMemory } from '../utils/storage';
 import { supabase, signInWithGoogle, signOut, getSession } from '../utils/supabase';
-import { User, Briefcase, GraduationCap, FileText, History, Settings, LogOut, Plus, Trash2, Save } from 'lucide-react';
+import { User, Briefcase, GraduationCap, FileText, History, Settings, LogOut, Plus, Trash2, Save, HelpCircle } from 'lucide-react';
 
 export default function OptionsApp() {
     const [activeTab, setActiveTab] = useState('profile');
@@ -13,6 +13,9 @@ export default function OptionsApp() {
         experience: [],
         resume: null
     });
+    const [answers, setAnswers] = useState({});
+    const [editingKey, setEditingKey] = useState(null);
+    const [editValue, setEditValue] = useState('');
     const [saveStatus, setSaveStatus] = useState('');
 
     useEffect(() => {
@@ -28,6 +31,8 @@ export default function OptionsApp() {
     const loadData = async () => {
         const stored = await getProfile();
         setData(stored);
+        const mem = await getAnswerMemory();
+        setAnswers(mem);
         setLoading(false);
     };
 
@@ -99,6 +104,32 @@ export default function OptionsApp() {
         reader.readAsDataURL(file);
     };
 
+    const handleDeleteAnswer = async (key) => {
+        const updated = { ...answers };
+        delete updated[key];
+        setAnswers(updated);
+        await saveAnswerMemory(updated);
+    };
+
+    const handleStartEdit = (key, currentAnswer) => {
+        setEditingKey(key);
+        setEditValue(currentAnswer);
+    };
+
+    const handleSaveEdit = async (key) => {
+        if (!editValue.trim()) return;
+        const updated = { ...answers };
+        updated[key] = { ...updated[key], answer: editValue.trim(), lastUsed: Date.now() };
+        setAnswers(updated);
+        setEditingKey(null);
+        await saveAnswerMemory(updated);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingKey(null);
+        setEditValue('');
+    };
+
     if (loading) return <div className="p-8 text-center">Loading Dashboard...</div>;
 
     return (
@@ -114,6 +145,7 @@ export default function OptionsApp() {
                     <NavBtn label="Experience" icon={<Briefcase size={18} />} active={activeTab === 'experience'} onClick={() => setActiveTab('experience')} />
                     <NavBtn label="Education" icon={<GraduationCap size={18} />} active={activeTab === 'education'} onClick={() => setActiveTab('education')} />
                     <NavBtn label="Resume" icon={<FileText size={18} />} active={activeTab === 'resume'} onClick={() => setActiveTab('resume')} />
+                    <NavBtn label="Saved Answers" icon={<HelpCircle size={18} />} active={activeTab === 'answers'} onClick={() => setActiveTab('answers')} />
                     <div className="pt-4 border-t border-slate-800 mt-4">
                         <NavBtn label="History" icon={<History size={18} />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
                         <NavBtn label="Settings" icon={<Settings size={18} />} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
@@ -247,6 +279,73 @@ export default function OptionsApp() {
                                         <p className="font-medium">{data.resume.name}</p>
                                         <p className="text-xs text-slate-500">Stored Locally • {Math.round((data.resume.data?.length || 0) * 0.75 / 1024)} KB</p>
                                     </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'answers' && (
+                        <div>
+                            {Object.keys(answers).length === 0 ? (
+                                <div className="text-center py-20 bg-slate-900 rounded border border-slate-800">
+                                    <HelpCircle className="mx-auto text-slate-600 mb-4" size={48} />
+                                    <h3 className="text-xl text-slate-400">Saved Answers</h3>
+                                    <p className="text-slate-500 mt-2">
+                                        No saved answers yet. When you fill in questions on job applications and click
+                                        "Save Answers to Memory", they'll appear here for reuse across applications.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {Object.entries(answers)
+                                        .sort(([, a], [, b]) => (b.useCount || 0) - (a.useCount || 0))
+                                        .map(([key, entry]) => (
+                                            <div key={key} className="bg-slate-900 p-4 rounded border border-slate-800 relative group">
+                                                <button
+                                                    onClick={() => handleDeleteAnswer(key)}
+                                                    className="absolute top-4 right-4 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                                <p className="font-medium text-white mb-1">{entry.question}</p>
+                                                {editingKey === key ? (
+                                                    <div className="flex gap-2 mt-1">
+                                                        <input
+                                                            type="text"
+                                                            className="input-field flex-1 text-sm"
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') handleSaveEdit(key);
+                                                                if (e.key === 'Escape') handleCancelEdit();
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                        <button
+                                                            onClick={() => handleSaveEdit(key)}
+                                                            className="btn-primary text-xs px-3 py-1"
+                                                        >
+                                                            Save
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <p
+                                                        className="text-blue-400 cursor-pointer hover:text-blue-300 text-sm"
+                                                        onClick={() => handleStartEdit(key, entry.answer)}
+                                                    >
+                                                        {entry.answer}
+                                                    </p>
+                                                )}
+                                                <div className="flex gap-4 mt-2 text-xs text-slate-500">
+                                                    <span>Used {entry.useCount || 0} time{(entry.useCount || 0) !== 1 ? 's' : ''}</span>
+                                                    <span>Field: {entry.fieldTag || 'input'}</span>
+                                                    {entry.lastUsed && (
+                                                        <span>Last used: {new Date(entry.lastUsed).toLocaleDateString()}</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
+                                    }
                                 </div>
                             )}
                         </div>

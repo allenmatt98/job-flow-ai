@@ -47,3 +47,19 @@ export const saveApiKey = async (apiKey) => {
         });
     });
 };
+
+export const getAnswerMemory = async () => {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['answerMemory'], (result) => {
+            resolve(result.answerMemory || {});
+        });
+    });
+};
+
+export const saveAnswerMemory = async (memory) => {
+    return new Promise((resolve) => {
+        chrome.storage.local.set({ answerMemory: memory }, () => {
+            resolve(true);
+        });
+    });
+};

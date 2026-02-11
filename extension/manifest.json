@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "AI Job Application Assistant",
-    "version": "1.1.4",
+    "version": "1.2.0",
     "description": "Auto-fill job applications with AI.",
     "side_panel": {
         "default_path": "index.html"

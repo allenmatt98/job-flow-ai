@@ -9,6 +9,9 @@ function App() {
   const [activeTab, setActiveTab] = useState('profile');
   const [scanResult, setScanResult] = useState(null);
   const [filling, setFilling] = useState(false);
+  const [autofillDone, setAutofillDone] = useState(false);
+  const [savingAnswers, setSavingAnswers] = useState(false);
+  const [saveResult, setSaveResult] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatedContent, setGeneratedContent] = useState('');
 
@@ -41,11 +44,31 @@ function App() {
 
       if (response && response.success) {
         console.log('Filled', response.count);
+        setAutofillDone(true);
+        setSaveResult(null);
       }
     } catch (err) {
       console.error('Autofill failed:', err);
     }
     setFilling(false);
+  };
+
+  const handleSaveAnswers = async () => {
+    setSavingAnswers(true);
+    setSaveResult(null);
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'SAVE_ANSWERS' });
+      if (response?.error) {
+        setSaveResult({ error: response.error });
+      } else {
+        setSaveResult({ saved: response.saved, total: response.totalStored });
+      }
+    } catch (err) {
+      console.error('Save answers failed:', err);
+      setSaveResult({ error: err.message });
+    }
+    setSavingAnswers(false);
   };
 
   const handleGenerateCoverLetter = async () => {
@@ -133,6 +156,29 @@ function App() {
                 >
                   {filling ? 'Filling...' : 'Autofill Fields'}
                 </button>
+
+                {autofillDone && (
+                  <div className="mt-4 p-3 border border-slate-700 rounded bg-slate-900">
+                    <p className="text-xs text-slate-400 mb-2">
+                      Filled in some questions manually? Save them for next time.
+                    </p>
+                    <button
+                      onClick={handleSaveAnswers}
+                      disabled={savingAnswers}
+                      className="btn-secondary w-full text-sm"
+                    >
+                      {savingAnswers ? 'Saving...' : 'Save Answers to Memory'}
+                    </button>
+                    {saveResult && !saveResult.error && (
+                      <p className="text-xs text-green-400 mt-2">
+                        Saved {saveResult.saved} answer{saveResult.saved !== 1 ? 's' : ''} ({saveResult.total} total in memory)
+                      </p>
+                    )}
+                    {saveResult?.error && (
+                      <p className="text-xs text-red-400 mt-2">Error: {saveResult.error}</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

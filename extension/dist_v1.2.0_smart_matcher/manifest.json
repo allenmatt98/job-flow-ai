@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "AI Job Application Assistant",
+  "version": "1.2.0",
+  "description": "Auto-fill job applications with AI.",
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "options_ui": {
+    "page": "src/options/index.html",
+    "open_in_tab": true
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel",
+    "identity"
+  ],
+  "content_scripts": [
+    {
+      "js": [
+        "assets/index.js-CCgvhshC.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/index.js-CCgvhshC.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

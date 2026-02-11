@@ -34,6 +34,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!currentStrategy) currentStrategy = strategyManager.getStrategy();
             const text = currentStrategy.getPageText();
             sendResponse({ text });
+        } else if (request.action === 'SAVE_ANSWERS') {
+            if (!currentStrategy || typeof currentStrategy.captureUnknownAnswers !== 'function') {
+                sendResponse({ error: 'Strategy does not support answer capture' });
+                return true;
+            }
+            const entries = currentStrategy.captureUnknownAnswers();
+            if (entries.length === 0) {
+                sendResponse({ saved: 0, totalStored: 0 });
+                return true;
+            }
+            import('../utils/AnswerMemory.js').then(({ learnAnswers }) => {
+                learnAnswers(entries).then(result => {
+                    sendResponse(result);
+                });
+            }).catch(err => {
+                sendResponse({ error: err.message });
+            });
+            return true; // async
         }
     } catch (e) {
         console.error('Job Flow AI Error:', e);

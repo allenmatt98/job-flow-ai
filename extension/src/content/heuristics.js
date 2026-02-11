@@ -10,11 +10,16 @@ export const FIELD_MAPPINGS = {
     school: ['school', 'university', 'college', 'institution', 'alma mater'],
     degree: ['degree', 'qualification', 'major'],
     company: ['company', 'organization', 'employer', 'work experience'],
-    title: ['job title', 'role', 'position'],
+    title: ['job title', 'title', 'role', 'position'],
     startDate: ['start date', 'from', 'start'],
     endDate: ['end date', 'to', 'end'],
     location: ['location', 'city', 'address'],
-    currentRole: ['current role', 'current position']
+    currentRole: ['current role', 'current position'],
+    description: ['description', 'responsibilities', 'duties', 'summary', 'accomplishments'],
+    gender: ['gender', 'sex', 'how do you identify'],
+    race: ['race', 'ethnicity', 'latino', 'hispanic'],
+    veteran: ['veteran', 'active duty', 'armed forces'],
+    disability: ['disability', 'handicapped', 'impairment']
 };
 
 export const getFieldType = (element) => {

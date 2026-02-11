@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mock Greenhouse Job Application</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 700px; margin: 40px auto; }
+        .field { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 4px; }
+        input, textarea, select { width: 100%; padding: 5px; box-sizing: border-box; }
+        h3 { margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 6px; }
+        .education-row, .employment-row { border: 1px solid #e5e7eb; padding: 12px; margin-bottom: 10px; border-radius: 4px; }
+        a { color: #2563eb; cursor: pointer; }
+        #status { margin-top: 20px; padding: 10px; background: #f0f9ff; border-radius: 4px; font-size: 13px; color: #555; }
+    </style>
+</head>
+<body>
+    <h2>Mock Greenhouse Job Application</h2>
+    <p id="status">Ready — use the extension side panel to scan &amp; autofill.</p>
+
+    <div id="main_fields">
+        <div class="field">
+            <label for="first_name">First Name</label>
+            <input type="text" id="first_name" name="first_name">
+        </div>
+        <div class="field">
+            <label for="last_name">Last Name</label>
+            <input type="text" id="last_name" name="last_name">
+        </div>
+        <div class="field">
+            <label for="email">Email</label>
+            <input type="text" id="email" name="email">
+        </div>
+        <div class="field">
+            <label for="phone">Phone</label>
+            <input type="text" id="phone" name="phone">
+        </div>
+        <div class="field">
+            <label for="resume">Resume/CV</label>
+            <input type="file" id="resume" name="resume">
+        </div>
+    </div>
+
+    <!-- Education Section -->
+    <fieldset id="education_section">
+        <h3>Education</h3>
+        <div class="education-row">
+            <div class="field">
+                <label>School</label>
+                <input type="text" name="job_application[educations][][school_name]">
+            </div>
+            <div class="field">
+                <label>Degree</label>
+                <select name="job_application[educations][][degree]">
+                    <option value="">-- Select Degree --</option>
+                    <option value="high_school">High School</option>
+                    <option value="associate">Associate's Degree</option>
+                    <option value="bachelors">Bachelor's Degree</option>
+                    <option value="bachelor_of_arts">Bachelor of Arts (B.A.)</option>
+                    <option value="bachelor_of_science">Bachelor of Science (B.S.)</option>
+                    <option value="bachelor_of_engineering">Bachelor of Engineering (B.E./B.Tech)</option>
+                    <option value="bachelor_of_business">Bachelor of Business Administration (BBA)</option>
+                    <option value="bachelor_of_fine_arts">Bachelor of Fine Arts (BFA)</option>
+                    <option value="masters">Master's Degree</option>
+                    <option value="master_of_arts">Master of Arts (M.A.)</option>
+                    <option value="master_of_science">Master of Science (M.S.)</option>
+                    <option value="master_of_business">Master of Business Administration (MBA)</option>
+                    <option value="master_of_engineering">Master of Engineering (M.Eng)</option>
+                    <option value="master_of_fine_arts">Master of Fine Arts (MFA)</option>
+                    <option value="master_of_public_health">Master of Public Health (MPH)</option>
+                    <option value="juris_doctor">Juris Doctor (J.D.)</option>
+                    <option value="doctor_of_medicine">Doctor of Medicine (M.D.)</option>
+                    <option value="phd">Doctor of Philosophy (Ph.D.)</option>
+                    <option value="doctor_of_education">Doctor of Education (Ed.D.)</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Start Date</label>
+                <input type="text" name="job_application[educations][][start_date][month]" placeholder="Month">
+                <input type="text" name="job_application[educations][][start_date][year]" placeholder="Year">
+            </div>
+             <div class="field">
+                <label>End Date</label>
+                <input type="text" name="job_application[educations][][end_date][month]" placeholder="Month">
+                <input type="text" name="job_application[educations][][end_date][year]" placeholder="Year">
+            </div>
+        </div>
+        <a href="#" id="add_education">Add Another Education</a>
+    </fieldset>
+
+    <!-- Employment Section -->
+    <fieldset id="employment_section">
+        <h3>Employment</h3>
+        <div class="employment-row">
+            <div class="field">
+                <label>Company Name</label>
+                <input type="text" name="job_application[employments][][company_name]">
+            </div>
+            <div class="field">
+                <label>Title</label>
+                <input type="text" name="job_application[employments][][title]">
+            </div>
+            <div class="field">
+                <label>Start Date</label>
+                <input type="text" name="job_application[employments][][start_date][month]" placeholder="Month">
+                <input type="text" name="job_application[employments][][start_date][year]" placeholder="Year">
+            </div>
+             <div class="field">
+                <label>End Date</label>
+                <input type="text" name="job_application[employments][][end_date][month]" placeholder="Month">
+                <input type="text" name="job_application[employments][][end_date][year]" placeholder="Year">
+            </div>
+            <div class="field">
+                <label>Responsibilities</label>
+                <textarea name="job_application[employments][][description]"></textarea>
+            </div>
+        </div>
+        <a href="#" id="add_employment">Add Another Employment</a>
+    </fieldset>
+
+    <!-- Demographics Section -->
+    <fieldset id="demographics_section">
+        <h3>Demographic Questions</h3>
+        <div class="field">
+            <label for="gender">Gender</label>
+            <select id="gender" name="job_application[gender]">
+                <option value="">-- Select --</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="nonbinary">Non-binary</option>
+                <option value="decline">Decline to self-identify</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="race">Race / Ethnicity</label>
+            <select id="race" name="job_application[race]">
+                <option value="">-- Select --</option>
+                <option value="american_indian">American Indian or Alaska Native</option>
+                <option value="asian">Asian</option>
+                <option value="black">Black or African American</option>
+                <option value="hispanic">Hispanic or Latino</option>
+                <option value="hawaiian">Native Hawaiian or Other Pacific Islander</option>
+                <option value="white">White</option>
+                <option value="two_or_more">Two or More Races</option>
+                <option value="decline">Decline to self-identify</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="veteran">Veteran Status</label>
+            <select id="veteran" name="job_application[veteran]">
+                <option value="">-- Select --</option>
+                <option value="not_veteran">I am not a protected veteran</option>
+                <option value="veteran">I identify as one or more of the classifications of a protected veteran</option>
+                <option value="decline">I don't wish to answer</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="disability">Disability Status</label>
+            <select id="disability" name="job_application[disability]">
+                <option value="">-- Select --</option>
+                <option value="yes">Yes, I have a disability (or previously had a disability)</option>
+                <option value="no">No, I don't have a disability</option>
+                <option value="decline">I don't wish to answer</option>
+            </select>
+        </div>
+    </fieldset>
+
+    <script>
+        // "Add Another" with async delay to simulate React rendering
+        function addRow(sectionId, rowClass, linkEl, e) {
+            e.preventDefault();
+            const section = document.getElementById(sectionId);
+            const row = section.querySelector('.' + rowClass).cloneNode(true);
+            row.querySelectorAll('input, textarea, select').forEach(i => {
+                if (i.tagName.toLowerCase() === 'select') {
+                    i.selectedIndex = 0;
+                } else {
+                    i.value = '';
+                }
+            });
+
+            // Random async delay (100-500ms) to simulate React batched rendering
+            const delay = 100 + Math.floor(Math.random() * 400);
+            document.getElementById('status').textContent = `Adding row (simulated ${delay}ms delay)...`;
+
+            setTimeout(() => {
+                section.insertBefore(row, linkEl);
+                document.getElementById('status').textContent = 'Row added.';
+            }, delay);
+        }
+
+        document.getElementById('add_education').addEventListener('click', function(e) {
+            addRow('education_section', 'education-row', this, e);
+        });
+
+        document.getElementById('add_employment').addEventListener('click', function(e) {
+            addRow('employment_section', 'employment-row', this, e);
+        });
+    </script>
+</body>
+</html>
