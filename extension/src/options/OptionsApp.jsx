@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getProfile, saveProfile, getAnswerMemory, saveAnswerMemory } from '../utils/storage';
 import { supabase, signInWithGoogle, signOut, getSession } from '../utils/supabase';
-import { User, Briefcase, GraduationCap, FileText, History, Settings, LogOut, Plus, Trash2, Save, HelpCircle } from 'lucide-react';
+import { parseResume } from '../utils/api';
+import { dataURLtoBlob } from '../content/utils/FileUploader';
+import { User, Briefcase, GraduationCap, FileText, History, Settings, LogOut, Plus, Trash2, Save, HelpCircle, Wand2 } from 'lucide-react';
 
 export default function OptionsApp() {
     const [activeTab, setActiveTab] = useState('profile');
@@ -17,6 +19,7 @@ export default function OptionsApp() {
     const [editingKey, setEditingKey] = useState(null);
     const [editValue, setEditValue] = useState('');
     const [saveStatus, setSaveStatus] = useState('');
+    const [parseStatus, setParseStatus] = useState('');
 
     useEffect(() => {
         checkSession();
@@ -102,6 +105,56 @@ export default function OptionsApp() {
             }));
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleParseResume = async () => {
+        if (!data.resume?.data) {
+            setParseStatus('No resume uploaded yet.');
+            return;
+        }
+
+        setParseStatus('Parsing resume with AI...');
+        try {
+            const blob = dataURLtoBlob(data.resume.data);
+            const file = new File([blob], data.resume.name, { type: data.resume.type });
+            const result = await parseResume(file, { extractStructured: true });
+
+            if (result.structured) {
+                const s = result.structured;
+                setData(prev => {
+                    const merged = { ...prev };
+
+                    // Merge userProfile — only fill empty fields
+                    if (s.userProfile) {
+                        const up = { ...prev.userProfile };
+                        for (const [key, val] of Object.entries(s.userProfile)) {
+                            if (val && !up[key]) up[key] = val;
+                        }
+                        merged.userProfile = up;
+                    }
+
+                    // Merge education — only if current list is empty
+                    if (s.education?.length > 0 && (!prev.education || prev.education.length === 0)) {
+                        merged.education = s.education;
+                    }
+
+                    // Merge experience — only if current list is empty
+                    if (s.experience?.length > 0 && (!prev.experience || prev.experience.length === 0)) {
+                        merged.experience = s.experience;
+                    }
+
+                    return merged;
+                });
+                setParseStatus('Parsed! Review and save.');
+            } else {
+                setParseStatus('Could not extract structured data. Is the backend running?');
+            }
+        } catch (err) {
+            console.error('Resume parse failed:', err);
+            setParseStatus(`Error: ${err.message}`);
+        }
+
+        setTimeout(() => setParseStatus(''), 5000);
     };
 
     const handleDeleteAnswer = async (key) => {
@@ -275,10 +328,31 @@ export default function OptionsApp() {
                             {data.resume && (
                                 <div className="mt-6 p-4 bg-slate-950 rounded flex items-center gap-3 border border-slate-800">
                                     <FileText className="text-green-500" />
-                                    <div>
+                                    <div className="flex-1">
                                         <p className="font-medium">{data.resume.name}</p>
                                         <p className="text-xs text-slate-500">Stored Locally • {Math.round((data.resume.data?.length || 0) * 0.75 / 1024)} KB</p>
                                     </div>
+                                </div>
+                            )}
+
+                            {data.resume && (
+                                <div className="mt-4">
+                                    <button
+                                        onClick={handleParseResume}
+                                        className="btn-primary flex items-center gap-2"
+                                        disabled={parseStatus === 'Parsing resume with AI...'}
+                                    >
+                                        <Wand2 size={18} />
+                                        {parseStatus === 'Parsing resume with AI...' ? 'Parsing...' : 'Parse Resume & Auto-Fill Profile'}
+                                    </button>
+                                    {parseStatus && (
+                                        <p className={`text-sm mt-2 ${parseStatus.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>
+                                            {parseStatus}
+                                        </p>
+                                    )}
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Uses AI to extract profile data from your resume. Only fills empty fields — never overwrites your data.
+                                    </p>
                                 </div>
                             )}
                         </div>

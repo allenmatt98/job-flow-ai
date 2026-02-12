@@ -1,9 +1,9 @@
-import { BaseStrategy } from './BaseStrategy';
+import { HeuristicStrategy } from './HeuristicStrategy';
+import { markField, FillConfidence } from '../utils/FillFeedback';
 
-export class GoogleFormsStrategy extends BaseStrategy {
+export class GoogleFormsStrategy extends HeuristicStrategy {
     constructor() {
         super('GoogleForms');
-        this.pageFields = [];
     }
 
     matches(hostname) {
@@ -11,65 +11,49 @@ export class GoogleFormsStrategy extends BaseStrategy {
     }
 
     scan() {
-        // Google forms use [role="listitem"] for questions
-        // This is a simplified implementation. Real Google Forms are tough because inputs are obscure.
-        // We look for 'input[type="text"]' (short answer) and 'textarea' (paragraph).
-        // The accessible name often connects to the question title.
-
         const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea');
         const distinctFields = [];
 
         inputs.forEach(input => {
             // Find the closest question container
-            const questionContainer = input.closest('[role="listitem"]') || input.closest('.geS5n'); // .geS5n is a common class for question block
+            const questionContainer = input.closest('[role="listitem"]') || input.closest('.geS5n');
 
             let labelText = '';
             if (questionContainer) {
-                // Try to find the title div
                 const titleDiv = questionContainer.querySelector('[role="heading"]');
                 if (titleDiv) labelText = titleDiv.innerText;
             } else {
                 labelText = input.getAttribute('aria-label') || '';
             }
 
-            // Simple mapping for now
+            // Simple mapping
             let type = 'unknown';
             const lowerLabel = labelText.toLowerCase();
             if (lowerLabel.includes('email')) type = 'email';
-            else if (lowerLabel.includes('name')) type = 'firstName'; // simplified
+            else if (lowerLabel.includes('name')) type = 'firstName';
             else if (lowerLabel.includes('phone')) type = 'phone';
 
-            if (type !== 'unknown') {
+            // Include if known type OR has a label (even if unknown)
+            if (type !== 'unknown' || labelText) {
                 distinctFields.push({
                     element: input,
                     type,
+                    label: labelText || type,
                     currentValue: input.value
                 });
-                input.style.border = '2px dashed #f59e0b'; // distinct border for gForms
+                try {
+                    markField(input, FillConfidence.SCANNED);
+                } catch (e) { }
             }
         });
 
         this.pageFields = distinctFields;
-        return distinctFields.map(f => ({ type: f.type, tagName: 'google-input' }));
+        return distinctFields.map(f => ({
+            type: f.label || f.type,
+            tagName: f.element.tagName,
+            standardType: f.type
+        }));
     }
 
-    autofill(profile) {
-        let filledCount = 0;
-        this.pageFields.forEach(field => {
-            if (profile[field.type]) {
-                const val = profile[field.type];
-
-                // Google forms requires input events to register valid state
-                field.element.value = val;
-                field.element.dispatchEvent(new Event('input', { bubbles: true }));
-                field.element.dispatchEvent(new Event('change', { bubbles: true }));
-                // Sometimes focus/blur is needed
-                field.element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-                field.element.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
-
-                filledCount++;
-            }
-        });
-        return filledCount;
-    }
+    // autofill() inherited from HeuristicStrategy (3-pass: profile + memory + LLM)
 }

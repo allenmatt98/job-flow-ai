@@ -1,11 +1,11 @@
-import { BaseStrategy } from './BaseStrategy';
+import { HeuristicStrategy } from './HeuristicStrategy';
 import { findAllInputs, collectAllText } from '../utils/ShadowDom';
 import { getFieldType } from '../heuristics';
+import { markField, FillConfidence } from '../utils/FillFeedback';
 
-export class SmartRecruitersStrategy extends BaseStrategy {
+export class SmartRecruitersStrategy extends HeuristicStrategy {
     constructor() {
         super('SmartRecruiters');
-        this.pageFields = [];
     }
 
     matches(hostname) {
@@ -20,45 +20,33 @@ export class SmartRecruitersStrategy extends BaseStrategy {
         inputs.forEach(input => {
             if (input.type === 'hidden' || input.style.display === 'none') return;
 
-            // Reuse the heuristic logic for field type detection, but applied to these deep elements
-            const type = getFieldType(input);
-            if (type !== 'unknown') {
+            // getFieldType returns { type, label }
+            const { type, label } = getFieldType(input);
+
+            if (type !== 'unknown' || label) {
                 distinctFields.push({
                     element: input,
                     type,
+                    label: label || type,
                     currentValue: input.value
                 });
-                // Style might not work inside closed shadow root check, but for open it works
                 try {
-                    input.style.border = '2px solid #8b5cf6'; // Purple for SmartRecruiters
+                    if (type !== 'unknown') {
+                        markField(input, FillConfidence.SCANNED);
+                    }
                 } catch (e) { }
             }
         });
 
         this.pageFields = distinctFields;
-        return distinctFields.map(f => ({ type: f.type, tagName: f.element.tagName }));
+        return distinctFields.map(f => ({
+            type: f.label || f.type,
+            tagName: f.element.tagName,
+            standardType: f.type
+        }));
     }
 
-    autofill(profile) {
-        let filledCount = 0;
-        this.pageFields.forEach(field => {
-            // Handle Profile (Standard Fields)
-            if (profile.userProfile && profile.userProfile[field.type]) {
-                const val = profile.userProfile[field.type];
-
-                field.element.value = val;
-                field.element.dispatchEvent(new Event('input', { bubbles: true }));
-                field.element.dispatchEvent(new Event('change', { bubbles: true }));
-                filledCount++;
-            }
-            // Handle Resume
-            else if (field.type === 'resume' && profile.resume) {
-                // TODO: SmartRecruiters shadow dom file input might be tricky, usually standard input[type=file] works if found.
-                // Import uploadResume if needed, but for now we assume standard behavior
-            }
-        });
-        return filledCount;
-    }
+    // autofill() inherited from HeuristicStrategy (3-pass: profile + memory + LLM)
 
     getPageText() {
         return collectAllText(document.body).substring(0, 15000);

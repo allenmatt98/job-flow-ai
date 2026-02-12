@@ -11,9 +11,9 @@ export const FillConfidence = Object.freeze({
 });
 
 const CONFIDENCE_STYLES = {
-    [FillConfidence.HIGH]:    { border: '2px solid #22c55e', background: 'rgba(34,197,94,0.06)' },
-    [FillConfidence.MEDIUM]:  { border: '2px solid #eab308', background: 'rgba(234,179,8,0.06)' },
-    [FillConfidence.FAILED]:  { border: '2px solid #ef4444', background: 'rgba(239,68,68,0.06)' },
+    [FillConfidence.HIGH]: { border: '2px solid #22c55e', background: 'rgba(34,197,94,0.06)' },
+    [FillConfidence.MEDIUM]: { border: '2px solid #eab308', background: 'rgba(234,179,8,0.06)' },
+    [FillConfidence.FAILED]: { border: '2px solid #ef4444', background: 'rgba(239,68,68,0.06)' },
     [FillConfidence.SCANNED]: { border: '2px solid #3b82f6', background: 'rgba(59,130,246,0.06)' }
 };
 
@@ -28,11 +28,10 @@ const TOOLTIP_ATTR = 'data-jfai-tooltip';
  * @param {string} [tooltip] - Optional hover text explaining the match
  */
 export function markField(element, confidence, tooltip) {
-    if (!element || !CONFIDENCE_STYLES[confidence]) return;
+    if (!element) return;
 
-    const styles = CONFIDENCE_STYLES[confidence];
-    element.style.border = styles.border;
-    element.style.backgroundColor = styles.background;
+    // We only set the data attribute for internal logic.
+    // Visual styles (border/bg) are removed per user request for "authentic feel".
     element.setAttribute(DATA_ATTR, confidence);
 
     if (tooltip) {

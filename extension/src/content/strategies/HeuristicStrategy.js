@@ -7,6 +7,36 @@ export class HeuristicStrategy extends BaseStrategy {
     constructor(name = 'Heuristic') {
         super(name);
         this.pageFields = [];
+        this.isPaused = false;
+
+        // Bind pause toggle
+        window.addEventListener('JOB_FLOW_PAUSE_TOGGLE', (e) => {
+            this.isPaused = e.detail.paused;
+            console.log(`[Strategy] Paused: ${this.isPaused}`);
+        });
+
+        window.addEventListener('JOB_FLOW_STOP', () => {
+            this.stopRequested = true;
+        });
+    }
+
+    async waitIfPaused() {
+        if (!this.isPaused) return;
+        return new Promise(resolve => {
+            const check = setInterval(() => {
+                if (!this.isPaused) {
+                    clearInterval(check);
+                    resolve();
+                }
+            }, 200);
+        });
+    }
+
+    // Helper to update widget
+    updateWidget(filled, total, status) {
+        import('../ui/ProgressWidget.js').then(({ progressWidget }) => {
+            progressWidget.update(filled, total, status);
+        });
     }
 
     matches(hostname) {
@@ -54,10 +84,25 @@ export class HeuristicStrategy extends BaseStrategy {
     async autofill(profile) {
         let filledCount = 0;
         console.log('Starting Heuristic Autofill...');
+        this.stopRequested = false;
+
+        // Initialize Widget
+        this.updateWidget(0, this.pageFields.length, 'Autofilling...');
 
         // Pass 1: Profile data fill
-        for (const field of this.pageFields) {
+        for (const [index, field] of this.pageFields.entries()) {
+            if (this.stopRequested) {
+                this.updateWidget(filledCount, this.pageFields.length, 'Stopped');
+                return filledCount;
+            }
+
             try {
+                // Check Pause State
+                await this.waitIfPaused();
+
+                // update widget progress
+                this.updateWidget(filledCount, this.pageFields.length, `Filling ${field.label}...`);
+
                 // Safety Bubble: Each field runs independently
                 if (field.type !== 'unknown' && profile.userProfile && profile.userProfile[field.type]) {
                     const val = profile.userProfile[field.type];
@@ -102,6 +147,51 @@ export class HeuristicStrategy extends BaseStrategy {
             }
         } catch (err) {
             console.error('Memory recall module load failed:', err);
+        }
+
+        // Pass 3: LLM-generated answers for remaining empty unknown text fields
+        try {
+            const remainingFields = this.pageFields.filter(f =>
+                f.type === 'unknown' && f.label && !f.element.value &&
+                (f.element.tagName.toLowerCase() === 'input' && (f.element.type === 'text' || f.element.type === '') ||
+                 f.element.tagName.toLowerCase() === 'textarea')
+            );
+
+            if (remainingFields.length > 0) {
+                const { answerQuestion } = await import('../../utils/api.js');
+                const { getProfile } = await import('../../utils/storage.js');
+                const stored = await getProfile();
+                const userProfile = stored?.userProfile || {};
+                const jobDescription = document.body.innerText.substring(0, 3000);
+
+                for (const field of remainingFields) {
+                    if (this.stopRequested) break;
+                    await this.waitIfPaused();
+
+                    try {
+                        this.updateWidget(filledCount, this.pageFields.length, `AI: ${field.label.substring(0, 30)}...`);
+
+                        const fieldType = field.element.tagName.toLowerCase() === 'textarea' ? 'textarea' : 'text';
+                        const result = await answerQuestion({
+                            question: field.label,
+                            fieldType,
+                            userProfile,
+                            jobDescription,
+                            maxLength: field.element.maxLength > 0 ? field.element.maxLength : undefined
+                        });
+
+                        if (result?.answer) {
+                            await this.fillFieldWithTimeout(field.element, result.answer);
+                            markField(field.element, FillConfidence.MEDIUM, `AI: "${result.answer.substring(0, 50)}..."`);
+                            filledCount++;
+                        }
+                    } catch (err) {
+                        console.error(`LLM fill failed for "${field.label}":`, err);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('LLM pass module load failed (non-fatal):', err);
         }
 
         return filledCount;

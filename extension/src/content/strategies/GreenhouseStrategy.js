@@ -23,6 +23,9 @@ export class GreenhouseStrategy extends HeuristicStrategy {
             // 1. Standard Fill
             count += await super.autofill(profile);
 
+            if (this.stopRequested) return count;
+
+            this.updateWidget(count, 0, 'Analyzing dynamic sections...');
             console.log('Post-Resume Wait (5s) for parsing...');
             await new Promise(r => setTimeout(r, 5000));
 
@@ -63,7 +66,41 @@ export class GreenhouseStrategy extends HeuristicStrategy {
             count += await this.fillDemographics(profile.userProfile);
         } catch (e) { console.error('Demographics failed:', e); }
 
+        // 5. Setup Learning (Submit Listener)
+        this.addSubmitListener();
+
         return count;
+    }
+
+    addSubmitListener() {
+        if (this.hasSubmitListener) return;
+
+        // Try to find the submit button
+        const submitBtn = document.getElementById('submit_app') ||
+            document.querySelector('button[type="submit"]') ||
+            Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Submit Application'));
+
+        if (submitBtn) {
+            console.log('[Greenhouse] Submit listener attached.');
+            this.hasSubmitListener = true;
+
+            submitBtn.addEventListener('click', async () => {
+                console.log('[Greenhouse] Submit detected! Capturing answers...');
+                try {
+                    const entries = this.captureUnknownAnswers();
+                    if (entries.length > 0) {
+                        const { learnAnswers } = await import('../../utils/AnswerMemory.js');
+                        const result = await learnAnswers(entries);
+                        console.log(`[Greenhouse] Learned ${result.saved} new answers.`);
+
+                        // Show brief success feedback
+                        this.updateWidget(0, 0, 'Answers Saved!');
+                    }
+                } catch (e) {
+                    console.error('[Greenhouse] Failed to learn answers:', e);
+                }
+            });
+        }
     }
 
     async scrollToSection(keyword) {
@@ -79,6 +116,9 @@ export class GreenhouseStrategy extends HeuristicStrategy {
         let count = 0;
 
         for (let i = 0; i < dataArray.length; i++) {
+            if (this.stopRequested) return count;
+            await this.waitIfPaused();
+
             const item = dataArray[i];
 
             // 1. ADD ANOTHER LOGIC
@@ -130,12 +170,18 @@ export class GreenhouseStrategy extends HeuristicStrategy {
 
             // 2. FILL FIELDS
             if (sectionName === 'education') {
+                if (this.stopRequested) return count;
+                await this.waitIfPaused();
+
                 count += await this.fillSmartInput(i, 'school', item.school);
                 count += await this.fillSmartDropdown(i, 'degree', item.degree);
                 count += await this.fillAtIndex(i, 'startDate', { month: '', year: item.start });
                 count += await this.fillAtIndex(i, 'endDate', { month: '', year: item.end });
             }
             else if (sectionName === 'employment') {
+                if (this.stopRequested) return count;
+                await this.waitIfPaused();
+
                 count += await this.fillSmartInput(i, 'company', item.company);
                 count += await this.fillSmartInput(i, 'title', item.title);
                 count += await this.fillAtIndex(i, 'description', item.description);
@@ -199,7 +245,17 @@ export class GreenhouseStrategy extends HeuristicStrategy {
                     markField(element, confidence, `Matched "${value}" → "${result.match}" (${result.confidence}, ${result.score.toFixed(2)})`);
                     return 1;
                 } else {
-                    // No match — do NOT force fill
+                    // No SmartMatcher match — try LLM fallback
+                    try {
+                        const { matchDropdown } = await import('../../utils/api.js');
+                        const question = this.getLabelText(element);
+                        const llmResult = await matchDropdown({ question, options, userValue: value });
+                        if (llmResult?.match) {
+                            await this.fillFieldWithTimeout(element, llmResult.match);
+                            markField(element, FillConfidence.MEDIUM, `LLM: "${value}" → "${llmResult.match}"`);
+                            return 1;
+                        }
+                    } catch (e) { /* LLM fallback non-fatal */ }
                     markField(element, FillConfidence.FAILED, `No match found for "${value}"`);
                     return 0;
                 }
@@ -245,6 +301,23 @@ export class GreenhouseStrategy extends HeuristicStrategy {
                         return 1;
                     }
                 }
+            }
+
+            // No SmartMatcher match — try LLM fallback on dropdown options
+            if (optionTexts.length > 0) {
+                try {
+                    const { matchDropdown } = await import('../../utils/api.js');
+                    const question = this.getLabelText(element);
+                    const llmResult = await matchDropdown({ question, options: optionTexts, userValue: value });
+                    if (llmResult?.match) {
+                        const bestOptionEl = visibleOptions.find(o => o.innerText === llmResult.match);
+                        if (bestOptionEl) {
+                            bestOptionEl.click();
+                            markField(element, FillConfidence.MEDIUM, `LLM: "${value}" → "${llmResult.match}"`);
+                            return 1;
+                        }
+                    }
+                } catch (e) { /* LLM fallback non-fatal */ }
             }
 
             // No match — clear the input and mark as failed (do NOT force Enter)
@@ -295,7 +368,32 @@ export class GreenhouseStrategy extends HeuristicStrategy {
         let count = 0;
         const demoFields = ['gender', 'race', 'veteran', 'disability'];
         for (const type of demoFields) {
-            if (userProfile[type]) {
+            if (this.stopRequested) return count;
+            await this.waitIfPaused();
+
+            let valueToFill = userProfile[type];
+            let source = 'Profile';
+
+            // Fallback: Check Memory if profile is missing this field
+            if (!valueToFill) {
+                // We need a label to look up memory. Find the field first.
+                const matches = this.findFieldsByType(type);
+                if (matches[0]) {
+                    const label = this.getLabelText(matches[0]);
+                    if (label) {
+                        try {
+                            const { recallAnswer } = await import('../../utils/AnswerMemory.js');
+                            const memory = await recallAnswer(label);
+                            if (memory) {
+                                valueToFill = memory.answer;
+                                source = 'Memory';
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+            }
+
+            if (valueToFill) {
                 const matches = this.findFieldsByType(type);
                 if (matches[0]) {
                     const element = matches[0];
@@ -303,20 +401,36 @@ export class GreenhouseStrategy extends HeuristicStrategy {
                     // Use tiered matching for demographic selects
                     if (element.tagName.toLowerCase() === 'select') {
                         const options = Array.from(element.options).map(o => o.text);
-                        const result = smartMatcher.findBestMatchTiered(userProfile[type], options);
+                        const result = smartMatcher.findBestMatchTiered(valueToFill, options);
 
                         if (result) {
                             await this.fillFieldWithTimeout(element, result.match);
                             const confidence = result.confidence === 'high'
                                 ? FillConfidence.HIGH
                                 : FillConfidence.MEDIUM;
-                            markField(element, confidence, `Matched "${userProfile[type]}" → "${result.match}"`);
+                            markField(element, confidence, `Matched "${valueToFill}" (${source}) → "${result.match}"`);
                             count++;
                         } else {
-                            markField(element, FillConfidence.FAILED, `No match for "${userProfile[type]}"`);
+                            // No SmartMatcher match — try LLM fallback
+                            try {
+                                const { matchDropdown } = await import('../../utils/api.js');
+                                const question = this.getLabelText(element);
+                                const llmResult = await matchDropdown({ question, options, userValue: valueToFill });
+                                if (llmResult?.match) {
+                                    await this.fillFieldWithTimeout(element, llmResult.match);
+                                    markField(element, FillConfidence.MEDIUM, `LLM: "${valueToFill}" → "${llmResult.match}"`);
+                                    count++;
+                                } else if (source === 'Profile') {
+                                    markField(element, FillConfidence.FAILED, `No match for "${valueToFill}"`);
+                                }
+                            } catch (e) {
+                                if (source === 'Profile') {
+                                    markField(element, FillConfidence.FAILED, `No match for "${valueToFill}"`);
+                                }
+                            }
                         }
                     } else {
-                        await this.fillFieldWithTimeout(element, userProfile[type]);
+                        await this.fillFieldWithTimeout(element, valueToFill);
                         markField(element, FillConfidence.HIGH);
                         count++;
                     }
