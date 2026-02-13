@@ -63,3 +63,29 @@ export const saveAnswerMemory = async (memory) => {
         });
     });
 };
+
+export const getTimeSaved = async () => {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['timeSavedMinutes', 'applicationCount'], (result) => {
+            resolve({
+                timeSavedMinutes: result.timeSavedMinutes || 0,
+                applicationCount: result.applicationCount || 0,
+            });
+        });
+    });
+};
+
+export const incrementTimeSaved = async (minutes = 5) => {
+    const current = await getTimeSaved();
+    return new Promise((resolve) => {
+        chrome.storage.local.set({
+            timeSavedMinutes: current.timeSavedMinutes + minutes,
+            applicationCount: current.applicationCount + 1,
+        }, () => {
+            resolve({
+                timeSavedMinutes: current.timeSavedMinutes + minutes,
+                applicationCount: current.applicationCount + 1,
+            });
+        });
+    });
+};

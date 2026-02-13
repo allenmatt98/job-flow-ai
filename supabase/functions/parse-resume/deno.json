@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "node:buffer": "npm:buffer@^6.0.3"
+  }
+}

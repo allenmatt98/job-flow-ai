@@ -1,27 +1,33 @@
-const API_URL = 'http://localhost:3000/api';
+import { supabase } from './supabase';
 
-export const parseResume = async (file, { extractStructured = false } = {}) => {
-    const formData = new FormData();
-    formData.append('resume', file);
 
-    const url = extractStructured
-        ? `${API_URL}/parse-resume?extractStructured=true`
-        : `${API_URL}/parse-resume`;
-
-    const response = await fetch(url, {
-        method: 'POST',
+export const parseResume = async (formData) => {
+    const { data, error } = await supabase.functions.invoke('parse-resume', {
         body: formData,
     });
-    return response.json();
+
+    if (error) throw error;
+    return data;
 };
 
 export const generateResponse = async ({ jobDescription, userProfile, type }) => {
-    const response = await fetch(`${API_URL}/generate-response`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobDescription, userProfile, type }),
+    // Strip base64 resume data before sending to edge function
+    const { resume, ...profileWithoutResume } = userProfile || {};
+    const cleanProfile = { ...profileWithoutResume };
+    if (resume?.name) {
+        cleanProfile.resumeName = resume.name;
+    }
+
+    const { data, error } = await supabase.functions.invoke('generate-response', {
+        body: { action: 'generate-response', jobDescription, userProfile: cleanProfile, type },
     });
-    return response.json();
+
+    if (error) {
+        // Extract actual error message from the response context if available
+        const msg = data?.error || error.message || 'Edge Function error';
+        throw new Error(msg);
+    }
+    return data;
 };
 
 export const matchDropdown = async ({ question, options, userValue, context }) => {
@@ -29,14 +35,13 @@ export const matchDropdown = async ({ question, options, userValue, context }) =
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
 
-        const response = await fetch(`${API_URL}/match-dropdown`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, options, userValue, context }),
-            signal: controller.signal,
+        const { data, error } = await supabase.functions.invoke('generate-response', {
+            body: { action: 'match-dropdown', question, options, userValue, context },
         });
+
         clearTimeout(timeout);
-        return response.json();
+        if (error) throw error;
+        return data;
     } catch (e) {
         console.warn('matchDropdown failed (non-fatal):', e.message);
         return { match: null };
@@ -48,14 +53,18 @@ export const answerQuestion = async ({ question, fieldType, userProfile, jobDesc
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
 
-        const response = await fetch(`${API_URL}/answer-question`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, fieldType, userProfile, jobDescription, maxLength }),
-            signal: controller.signal,
+        // Strip base64 resume data before sending
+        const { resume, ...profileWithoutResume } = userProfile || {};
+        const cleanProfile = { ...profileWithoutResume };
+        if (resume?.name) cleanProfile.resumeName = resume.name;
+
+        const { data, error } = await supabase.functions.invoke('generate-response', {
+            body: { action: 'answer-question', question, fieldType, userProfile: cleanProfile, jobDescription, maxLength },
         });
+
         clearTimeout(timeout);
-        return response.json();
+        if (error) throw error;
+        return data;
     } catch (e) {
         console.warn('answerQuestion failed (non-fatal):', e.message);
         return { answer: null };
