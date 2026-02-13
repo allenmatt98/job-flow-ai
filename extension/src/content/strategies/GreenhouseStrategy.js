@@ -99,8 +99,44 @@ export class GreenhouseStrategy extends HeuristicStrategy {
                 } catch (e) {
                     console.error('[Greenhouse] Failed to learn answers:', e);
                 }
+
+                // Log application to Supabase
+                try {
+                    const { getSession, logApplication } = await import('../../utils/supabase.js');
+                    const session = await getSession();
+                    if (session) {
+                        const jobTitle = document.querySelector('h1, .job-title, [class*="job-title"]')?.innerText?.trim() || '';
+                        const companyName = this.extractCompanyFromPage();
+                        await logApplication({
+                            company_name: companyName || window.location.hostname,
+                            job_title: jobTitle,
+                            job_url: window.location.href,
+                            platform: 'greenhouse',
+                        });
+                        console.log('[Greenhouse] Application logged to cloud.');
+                    }
+                } catch (e) {
+                    console.error('[Greenhouse] Failed to log application:', e);
+                }
             });
         }
+    }
+
+    extractCompanyFromPage() {
+        // Try common Greenhouse selectors for company name
+        const companyEl = document.querySelector('.company-name, [class*="company"], .employer-name');
+        if (companyEl) return companyEl.innerText.trim();
+
+        // Try page title: "Job Title at Company"
+        const title = document.title || '';
+        const atMatch = title.match(/at\s+(.+?)(?:\s*[-|]|$)/i);
+        if (atMatch) return atMatch[1].trim();
+
+        // Fallback to subdomain: "company.greenhouse.io"
+        const parts = window.location.hostname.split('.');
+        if (parts.length >= 3) return parts[0];
+
+        return '';
     }
 
     async scrollToSection(keyword) {

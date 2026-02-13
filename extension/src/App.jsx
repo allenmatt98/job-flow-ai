@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import ProfileForm from './components/ProfileForm';
 import { getProfile } from './utils/storage';
 import { generateResponse } from './utils/api';
-import { User, Briefcase, Settings, FileText, Loader } from 'lucide-react';
+import { getSession, saveCoverLetter } from './utils/supabase';
+import { User, Briefcase, Settings, FileText, Loader, Check } from 'lucide-react';
 import './index.css';
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
   const [saveResult, setSaveResult] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatedContent, setGeneratedContent] = useState('');
+  const [coverLetterSaved, setCoverLetterSaved] = useState(false);
 
   const handleScan = async () => {
     try {
@@ -74,6 +76,7 @@ function App() {
   const handleGenerateCoverLetter = async () => {
     setGenerating(true);
     setGeneratedContent('');
+    setCoverLetterSaved(false);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const profile = await getProfile();
@@ -96,6 +99,19 @@ function App() {
 
       if (result.response) {
         setGeneratedContent(result.response);
+
+        // Auto-save to Supabase if logged in
+        const session = await getSession();
+        if (session) {
+          // Try to extract company/role from page title
+          const pageTitle = tab.title || '';
+          saveCoverLetter({
+            content: result.response,
+            jobTitle: pageTitle,
+            companyName: extractCompany(tab.url),
+          }).catch(() => {}); // Non-blocking
+          setCoverLetterSaved(true);
+        }
       } else {
         alert('Generation failed. Ensure the Backend is running and API Key is set in backend/.env');
       }
@@ -105,6 +121,16 @@ function App() {
       alert('Error connecting to backend services.');
     }
     setGenerating(false);
+  };
+
+  // Best-effort company extraction from URL hostname
+  const extractCompany = (url) => {
+    try {
+      const hostname = new URL(url).hostname;
+      // e.g. "boards.greenhouse.io" -> "greenhouse", "jobs.lever.co" -> "lever"
+      const parts = hostname.replace('www.', '').split('.');
+      return parts.length > 2 ? parts[parts.length - 3] : parts[0];
+    } catch { return ''; }
   };
 
   return (
@@ -209,6 +235,11 @@ function App() {
                   >
                     Copy to Clipboard
                   </button>
+                  {coverLetterSaved && (
+                    <p className="text-xs text-green-400 mt-1 flex items-center gap-1">
+                      <Check size={12} /> Saved to your dashboard
+                    </p>
+                  )}
                 </div>
               )}
             </div>

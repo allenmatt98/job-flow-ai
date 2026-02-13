@@ -1,4 +1,5 @@
 import { SmartMatcher } from './SmartMatcher';
+import { getSession, syncAnswerMemoryToCloud, pullAnswerMemoryFromCloud, deleteCloudAnswer } from './supabase';
 
 const STORAGE_KEY = 'answerMemory';
 
@@ -92,6 +93,8 @@ export async function learnAnswers(entries) {
     }
 
     await saveAnswerMemory(memory);
+    // Fire-and-forget cloud sync
+    syncToCloudIfLoggedIn(memory);
     return { saved, totalStored: Object.keys(memory).length };
 }
 
@@ -148,5 +151,92 @@ export async function updateAnswer(normalizedKey, newAnswer) {
         memory[normalizedKey].answer = newAnswer;
         memory[normalizedKey].lastUsed = Date.now();
         await saveAnswerMemory(memory);
+        // Sync updated answer to cloud
+        syncToCloudIfLoggedIn({ [normalizedKey]: memory[normalizedKey] });
+    }
+}
+
+// ─── Cloud Sync ─────────────────────────────────────────────────────────────
+
+/**
+ * Merge cloud answers into local storage.
+ * Cloud wins on conflicts where cloud has higher useCount.
+ * Returns the merged memory object.
+ */
+export async function pullFromCloud() {
+    const session = await getSession();
+    if (!session) return { merged: false, reason: 'not_authenticated' };
+
+    const { data: cloudMemory, error } = await pullAnswerMemoryFromCloud();
+    if (error) return { merged: false, reason: error.message };
+    if (!cloudMemory || Object.keys(cloudMemory).length === 0) {
+        return { merged: true, added: 0 };
+    }
+
+    const localMemory = await getAnswerMemory();
+    let added = 0;
+
+    for (const [key, cloudEntry] of Object.entries(cloudMemory)) {
+        const localEntry = localMemory[key];
+        if (!localEntry) {
+            // New from cloud
+            localMemory[key] = cloudEntry;
+            added++;
+        } else if (cloudEntry.useCount > localEntry.useCount) {
+            // Cloud has more usage, take cloud version
+            localMemory[key] = cloudEntry;
+        }
+        // Otherwise keep local (local is more recent)
+    }
+
+    await saveAnswerMemory(localMemory);
+    return { merged: true, added };
+}
+
+/**
+ * Push all local answers to cloud.
+ */
+export async function pushToCloud() {
+    const session = await getSession();
+    if (!session) return { pushed: false, reason: 'not_authenticated' };
+
+    const localMemory = await getAnswerMemory();
+    const { error } = await syncAnswerMemoryToCloud(localMemory);
+    if (error) return { pushed: false, reason: error.message };
+
+    return { pushed: true, count: Object.keys(localMemory).length };
+}
+
+/**
+ * Full bi-directional sync: pull from cloud, merge, then push merged state.
+ */
+export async function fullSync() {
+    const pullResult = await pullFromCloud();
+    if (!pullResult.merged) return pullResult;
+
+    const pushResult = await pushToCloud();
+    return { ...pullResult, ...pushResult };
+}
+
+/**
+ * Helper: sync a subset of answers to cloud if user is logged in.
+ * Non-blocking — fire and forget.
+ */
+function syncToCloudIfLoggedIn(entries) {
+    getSession().then((session) => {
+        if (session) {
+            syncAnswerMemoryToCloud(entries).catch(() => {});
+        }
+    });
+}
+
+/**
+ * Delete an answer from both local and cloud.
+ */
+export async function deleteAnswerEverywhere(normalizedKey) {
+    await deleteAnswer(normalizedKey);
+    const session = await getSession();
+    if (session) {
+        await deleteCloudAnswer(normalizedKey).catch(() => {});
     }
 }

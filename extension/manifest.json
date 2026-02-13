@@ -10,6 +10,10 @@
         "page": "src/options/index.html",
         "open_in_tab": true
     },
+    "oauth2": {
+        "client_id": "466437720264-iqiesbguqija1ci2kdb05c8rs949h7m7.apps.googleusercontent.com",
+        "scopes": ["openid", "email", "profile"]
+    },
     "permissions": [
         "activeTab",
         "scripting",

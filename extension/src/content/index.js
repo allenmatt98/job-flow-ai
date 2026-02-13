@@ -34,6 +34,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!currentStrategy) currentStrategy = strategyManager.getStrategy();
             const text = currentStrategy.getPageText();
             sendResponse({ text });
+        } else if (request.action === 'LOG_APPLICATION') {
+            // Log application to Supabase from the side panel
+            import('../utils/supabase.js').then(({ getSession, logApplication }) => {
+                getSession().then(session => {
+                    if (!session) {
+                        sendResponse({ logged: false, reason: 'not_authenticated' });
+                        return;
+                    }
+                    const jobTitle = document.querySelector('h1, .job-title, [class*="job-title"]')?.innerText?.trim() || '';
+                    const hostname = window.location.hostname;
+                    let platform = 'other';
+                    if (hostname.includes('greenhouse')) platform = 'greenhouse';
+                    else if (hostname.includes('lever')) platform = 'lever';
+                    else if (hostname.includes('smartrecruiters')) platform = 'smartrecruiters';
+                    else if (hostname.includes('workday')) platform = 'workday';
+                    else if (hostname.includes('icims')) platform = 'icims';
+
+                    // Try to extract company name
+                    let companyName = '';
+                    const companyEl = document.querySelector('.company-name, [class*="company"], .employer-name');
+                    if (companyEl) companyName = companyEl.innerText.trim();
+                    if (!companyName) {
+                        const titleMatch = document.title.match(/at\s+(.+?)(?:\s*[-|]|$)/i);
+                        if (titleMatch) companyName = titleMatch[1].trim();
+                    }
+                    if (!companyName) {
+                        const parts = hostname.replace('www.', '').split('.');
+                        companyName = parts.length > 2 ? parts[0] : parts[0];
+                    }
+
+                    logApplication({
+                        company_name: companyName,
+                        job_title: jobTitle,
+                        job_url: window.location.href,
+                        platform,
+                    }).then(({ error }) => {
+                        sendResponse({ logged: !error, error: error?.message });
+                    });
+                });
+            }).catch(err => {
+                sendResponse({ logged: false, error: err.message });
+            });
+            return true; // async
         } else if (request.action === 'SAVE_ANSWERS') {
             if (!currentStrategy || typeof currentStrategy.captureUnknownAnswers !== 'function') {
                 sendResponse({ error: 'Strategy does not support answer capture' });
